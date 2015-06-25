@@ -193,6 +193,11 @@ static void maybe_emit_bitshift_load(Type *ty) {
     SAVE;
     if (ty->bitsize <= 0)
         return;
+    assert(ty->bitoff >= 0);
+    if (ty->bitoff >= 64) {
+        printf("invariant violated:  type '%s' has bitoff %d (>= 64)", ty2s(ty), ty->bitoff);
+    }
+    assert(ty->bitoff < 64);        // TODO:  check actual word size of target arch
     emit("shr $%d, #rax", ty->bitoff);
     push("rcx");
     emit("mov $0x%lx, #rcx", (1 << (long)ty->bitsize) - 1);

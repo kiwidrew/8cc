@@ -196,7 +196,8 @@ int main(int argc, char **argv) {
         pid_t pid = fork();
         if (pid < 0) perror("fork");
         if (pid == 0) {
-            execlp("as", "as", "-o", outfile, "-c", asmfile, (char *)NULL);
+            /* execlp("as", "as", "-o", outfile, "-c", asmfile, (char *)NULL); */
+            execlp("as", "as", "-o", outfile, asmfile, (char *)NULL);
             perror("execl failed");
         }
         int status;

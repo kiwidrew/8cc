@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright 2012 Rui Ueyama. Released under the MIT license.
 
 function fail {

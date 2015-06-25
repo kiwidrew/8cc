@@ -7,7 +7,9 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdnoreturn.h>
+#include <stdarg.h>
+//#include <stdnoreturn.h>
+#define noreturn _Noreturn
 #include <time.h>
 
 enum {

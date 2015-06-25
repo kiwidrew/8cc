@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/env python2.7
 # Copyright 2015 Rui Ueyama. Released under the MIT license.
 
 # This file contains negative tests.

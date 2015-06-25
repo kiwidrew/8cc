@@ -2,6 +2,10 @@
 *.o
 *.s
 *~
+*.swp
 8cc
 stage?
 utiltest
+test/*.host
+test/*.8cc
+test/*.o
