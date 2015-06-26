@@ -52,7 +52,7 @@ Node *ast_typedef(Type *ty) {
 Node *ast_funcall(Type *ftype, char *fname, Vector *args) {
     Node *n;
 
-    n = ast_node(AST_FUNCALL, ftype->rettype);
+    n = ast_node(AST_FUNCALL, type_rettype(ftype));
     n->ftype = ftype;
     n->fname = fname;
     n->args = args;
@@ -70,9 +70,9 @@ Node *ast_funcdesg(Type *ty, char *fname) {
 Node *ast_funcptr_call(Node *fptr, Vector *args) {
     Node *n;
 
-    assert(fptr->ty->kind == KIND_PTR);
-    assert(fptr->ty->ptr->kind == KIND_FUNC);
-    n = ast_node(AST_FUNCPTR_CALL, fptr->ty->ptr->rettype);
+    assert(type_kind(fptr->ty) == KIND_PTR);
+    assert(type_kind(type_ptr(fptr->ty)) == KIND_FUNC);
+    n = ast_node(AST_FUNCPTR_CALL, type_rettype(type_ptr(fptr->ty)));
     n->fptr = fptr;
     n->args = args;
     return n;
@@ -410,14 +410,14 @@ static void a2s_declinit(Buffer *b, Vector *initlist) {
     }
 }
 
-static void do_node2s(Buffer *b, Node *node) {
+static void do_node2s(Buffer *b, Node *node, int indent) {
     if (!node) {
         buf_printf(b, "(nil)");
         return;
     }
     switch (node->kind) {
     case AST_LITERAL:
-        switch (node->ty->kind) {
+        switch (type_kind(node->ty)) {
         case KIND_CHAR:
             if (node->ival == '\n')      buf_printf(b, "'\n'");
             else if (node->ival == '\\') buf_printf(b, "'\\\\'");
@@ -446,10 +446,10 @@ static void do_node2s(Buffer *b, Node *node) {
         }
         break;
     case AST_LABEL:
-        buf_printf(b, "%s:", node->label);
+        buf_printf(b, "label:%s", node->label);
         break;
     case AST_LVAR:
-        buf_printf(b, "lv=%s", node->varname);
+        buf_printf(b, "lvar:%s", node->varname);
         if (node->lvarinit) {
             buf_printf(b, "(");
             a2s_declinit(b, node->lvarinit);
@@ -457,22 +457,22 @@ static void do_node2s(Buffer *b, Node *node) {
         }
         break;
     case AST_GVAR:
-        buf_printf(b, "gv=%s", node->varname);
+        buf_printf(b, "gvar:%s", node->varname);
         break;
     case AST_FUNCALL:
     case AST_FUNCPTR_CALL: {
-        buf_printf(b, "(%s)%s(", ty2s(node->ty),
+        buf_printf(b, "FUNCALL / FUNCPTR_CALL\n(%s)%s(\n", ty2s(node->ty),
                    node->kind == AST_FUNCALL ? node->fname : node2s(node));
         for (int i = 0; i < vec_len(node->args); i++) {
             if (i > 0)
-                buf_printf(b, ",");
+                buf_printf(b, ",\n");
             buf_printf(b, "%s", node2s(vec_get(node->args, i)));
         }
-        buf_printf(b, ")");
+        buf_printf(b, ")\n");
         break;
     }
     case AST_FUNCDESG: {
-        buf_printf(b, "(funcdesg %s)", node->fname);
+        buf_printf(b, "(funcdesg %s)\n", node->fname);
         break;
     }
     case AST_FUNC: {
@@ -483,12 +483,12 @@ static void do_node2s(Buffer *b, Node *node) {
             Node *param = vec_get(node->params, i);
             buf_printf(b, "%s %s", ty2s(param->ty), node2s(param));
         }
-        buf_printf(b, ")");
-        do_node2s(b, node->body);
+        buf_printf(b, ")\n");
+        do_node2s(b, node->body, indent + 1);
         break;
     }
     case AST_GOTO:
-        buf_printf(b, "goto(%s)", node->label);
+        buf_printf(b, "goto(%s)\n", node->label);
         break;
     case AST_DECL:
         buf_printf(b, "(decl %s %s",
@@ -498,7 +498,7 @@ static void do_node2s(Buffer *b, Node *node) {
             buf_printf(b, " ");
             a2s_declinit(b, node->declinit);
         }
-        buf_printf(b, ")");
+        buf_printf(b, ")\n");
         break;
     case AST_INIT:
         buf_printf(b, "%s@%d", node2s(node->initval), node->initoff, ty2s(node->totype));
@@ -526,14 +526,14 @@ static void do_node2s(Buffer *b, Node *node) {
     case AST_COMPOUND_STMT: {
         buf_printf(b, "{");
         for (int i = 0; i < vec_len(node->stmts); i++) {
-            do_node2s(b, vec_get(node->stmts, i));
+            do_node2s(b, vec_get(node->stmts, i), indent + 1);
             buf_printf(b, ";");
         }
         buf_printf(b, "}");
         break;
     }
     case AST_STRUCT_REF:
-        do_node2s(b, node->struc);
+        do_node2s(b, node->struc, indent + 1);
         buf_printf(b, ".");
         buf_printf(b, node->field);
         break;
@@ -589,6 +589,6 @@ static void do_node2s(Buffer *b, Node *node) {
 
 char *node2s(Node *node) {
     Buffer *b = make_buffer();
-    do_node2s(b, node);
+    do_node2s(b, node, 0);
     return buf_body(b);
 }

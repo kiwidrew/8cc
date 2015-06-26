@@ -165,35 +165,20 @@ enum {
     KIND_STUB,
 };
 
-typedef struct Type {
-    int kind;
-    int size;
-    int align;
-    bool usig; // true if unsigned
-    bool isstatic;
-    // pointer or array
-    struct Type *ptr;
-    // array length
-    int len;
-    // struct
-    Dict *fields;
-    int offset;
-    bool is_struct; // true if struct, false if union
-    // bitfield
-    int bitoff;
-    int bitsize;
-    // function
-    struct Type *rettype;
-    Vector *params;
-    bool hasva;
-    bool oldstyle;
-} Type;
-
 typedef struct {
     char *file;
     int line;
 } SourceLoc;
 
+
+#define EMPTY_MAP ((Map){})
+#define EMPTY_VECTOR ((Vector){})
+
+
+// type.h
+typedef struct Type Type;
+
+// type.c
 extern Type *type_void;
 extern Type *type_bool;
 extern Type *type_char;
@@ -209,9 +194,36 @@ extern Type *type_ullong;
 extern Type *type_float;
 extern Type *type_double;
 extern Type *type_ldouble;
-
-#define EMPTY_MAP ((Map){})
-#define EMPTY_VECTOR ((Vector){})
+extern Type *type_enum;
+Type *type_create_numeric(int, bool);
+Type *type_create_pointer(Type *);
+Type *type_create_array(Type *, int);
+Type *type_create_stub();
+Type *type_create_func(Type *rettype, Vector *paramtypes, bool has_varargs, bool oldstyle);
+Type *type_create_struct(bool is_struct);
+Type *type_copy(Type *ty);
+bool type_is_same_struct(Type *, Type *);
+bool type_is_same_arith_type(Type *, Type *);
+bool type_iscompatible(Type *, Type *);
+Type *type_promote(Type *, Type *);
+int type_kind(Type *);
+Type *type_ptr(Type *);
+int type_align(Type *);
+int type_size(Type *);
+int type_len(Type *);
+bool type_isint(Type *);
+bool type_isfloat(Type *);
+bool type_isstring(Type *);
+Type *type_rettype(Type *);
+int type_usig(Type *);
+int type_bitsize(Type *);
+bool type_isstatic(Type *);
+Dict *type_fields(Type *);
+int type_offset(Type *);
+bool type_isoldstyle(Type *);
+Vector *type_funcparams(Type *);
+bool type_isstruct(Type *);
+char *ty2s(Type *);
 
 // ast.h
 typedef struct Node Node;
@@ -297,7 +309,6 @@ Token *peek_token(void);
 Token *read_token(void);
 
 // debug.c
-char *ty2s(Type *ty);
 char *tok2s(Token *tok);
 
 // dict.c

@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include "8cc.h"
 #include "ast.h"
+#include "type.h"
 
 bool dumpstack = false;
 bool dumpsource = true;
@@ -419,7 +420,7 @@ static void emit_store(Node *var) {
 
 static void emit_to_bool(Type *ty) {
     SAVE;
-    if (is_flotype(ty)) {
+    if (type_isfloat(ty)) {
         push_xmm(1);
         emit("xorpd #xmm1, #xmm1");
         emit("%s #xmm1, #xmm0", (ty->kind == KIND_FLOAT) ? "ucomiss" : "ucomisd");
@@ -434,7 +435,7 @@ static void emit_to_bool(Type *ty) {
 
 static void emit_comp(char *inst, char *usiginst, Node *node) {
     SAVE;
-    if (is_flotype(node->left->ty)) {
+    if (type_isfloat(node->left->ty)) {
         emit_expr(node->left);
         push_xmm(0);
         emit_expr(node->right);
@@ -454,7 +455,7 @@ static void emit_comp(char *inst, char *usiginst, Node *node) {
         else
           emit("cmp #eax, #ecx");
     }
-    if (is_flotype(node->left->ty) || node->left->ty->usig)
+    if (type_isfloat(node->left->ty) || node->left->ty->usig)
         emit("%s #al", usiginst);
     else
         emit("%s #al", inst);
@@ -518,9 +519,9 @@ static void emit_binop_float_arith(Node *node) {
 
 static void emit_load_convert(Type *to, Type *from) {
     SAVE;
-    if (is_inttype(from) && to->kind == KIND_FLOAT)
+    if (type_isint(from) && to->kind == KIND_FLOAT)
         emit("cvtsi2ss #eax, #xmm0");
-    else if (is_inttype(from) && to->kind == KIND_DOUBLE)
+    else if (type_isint(from) && to->kind == KIND_DOUBLE)
         emit("cvtsi2sd #eax, #xmm0");
     else if (from->kind == KIND_FLOAT && to->kind == KIND_DOUBLE)
         emit("cvtps2pd #xmm0, #xmm0");
@@ -528,9 +529,9 @@ static void emit_load_convert(Type *to, Type *from) {
         emit("cvtpd2ps #xmm0, #xmm0");
     else if (to->kind == KIND_BOOL)
         emit_to_bool(from);
-    else if (is_inttype(from) && is_inttype(to))
+    else if (type_isint(from) && type_isint(to))
         emit_intcast(from);
-    else if (is_inttype(to))
+    else if (type_isint(to))
         emit_toint(from);
 }
 
@@ -552,9 +553,9 @@ static void emit_binop(Node *node) {
     case OP_LE: emit_comp("setle", "setna", node); return;
     case OP_NE: emit_comp("setne", "setne", node); return;
     }
-    if (is_inttype(node->ty))
+    if (type_isint(node->ty))
         emit_binop_int_arith(node);
-    else if (is_flotype(node->ty))
+    else if (type_isfloat(node->ty))
         emit_binop_float_arith(node);
     else
         error("internal error: %s", node2s(node));
@@ -695,7 +696,7 @@ static void set_reg_nums(Vector *args) {
     numgp = numfp = 0;
     for (int i = 0; i < vec_len(args); i++) {
         Node *arg = vec_get(args, i);
-        if (is_flotype(arg->ty))
+        if (type_isfloat(arg->ty))
             numfp++;
         else
             numgp++;
@@ -889,7 +890,7 @@ static void emit_builtin_reg_class(Node *node) {
     Type *ty = arg->ty->ptr;
     if (ty->kind == KIND_STRUCT)
         emit("mov $2, #eax");
-    else if (is_flotype(ty))
+    else if (type_isfloat(ty))
         emit("mov $1, #eax");
     else
         emit("mov $0, #eax");
@@ -932,7 +933,7 @@ static void classify_args(Vector *ints, Vector *floats, Vector *rest, Vector *ar
         Node *v = vec_get(args, i);
         if (v->ty->kind == KIND_STRUCT)
             vec_push(rest, v);
-        else if (is_flotype(v->ty))
+        else if (type_isfloat(v->ty))
             vec_push((xreg++ < xmax) ? floats : rest, v);
         else
             vec_push((ireg++ < imax) ? ints : rest, v);
@@ -965,7 +966,7 @@ static int emit_args(Vector *vals) {
         if (v->ty->kind == KIND_STRUCT) {
             emit_addr(v);
             r += push_struct(v->ty->size);
-        } else if (is_flotype(v->ty)) {
+        } else if (type_isfloat(v->ty)) {
             emit_expr(v);
             push_xmm(0);
             r += 8;
@@ -1448,7 +1449,7 @@ static void push_func_params(Vector *params, int off) {
             int size = push_struct(v->ty->size);
             off -= size;
             arg += size / 8;
-        } else if (is_flotype(v->ty)) {
+        } else if (type_isfloat(v->ty)) {
             if (xreg >= 8) {
                 emit("mov %d(#rbp), #rax", arg++ * 8);
                 push("rax");
