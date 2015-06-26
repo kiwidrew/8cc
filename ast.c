@@ -49,6 +49,9 @@ Node *ast_typedef(Type *ty) {
     return n;
 }
 
+
+// AST_FUNCALL
+
 Node *ast_funcall(Type *ftype, char *fname, Vector *args) {
     Node *n;
 
@@ -58,6 +61,17 @@ Node *ast_funcall(Type *ftype, char *fname, Vector *args) {
     n->args = args;
     return n;
 }
+
+Type *node_functype(Node *n) {
+    assert(n->kind == AST_FUNCALL);
+    return n->ftype;
+}
+
+Vector *node_funcall_args(Node *n) {
+    //assert(n->kind == AST_FUNCALL);
+    return n->args;
+}
+
 
 Node *ast_funcdesg(Type *ty, char *fname) {
     Node *n;
@@ -78,6 +92,14 @@ Node *ast_funcptr_call(Node *fptr, Vector *args) {
     return n;
 }
 
+Node *node_funcptr(Node *n) {
+    assert(n->kind == AST_FUNCPTR_CALL);
+    return n->fptr;
+}
+
+
+// AST_FUNC
+
 Node *ast_func(Type *ty, char *fname, Vector *params, Node *body, Vector *localvars) {
     Node *n;
 
@@ -87,6 +109,30 @@ Node *ast_func(Type *ty, char *fname, Vector *params, Node *body, Vector *localv
     n->localvars = localvars;
     n->body = body;
     return n;
+}
+
+Node *node_funcbody(Node *n) {
+    assert(n->kind == AST_FUNC);
+
+    return n->body;
+}
+
+Vector *node_funclocals(Node *n) {
+    assert(n->kind == AST_FUNC);
+
+    return n->localvars;
+}
+
+Vector *node_funcparams(Node *n) {
+    assert(n->kind == AST_FUNC);
+
+    return n->params;
+}
+
+char *node_funcname(Node *n) {
+    //assert(n->kind == AST_FUNC || n->kind == AST_FUNCALL);
+
+    return n->fname;
 }
 
 
@@ -129,6 +175,16 @@ int node_initoff(Node *n) {
     return n->initoff;
 }
 
+Node *node_initval(Node *n) {
+    assert(n->kind == AST_INIT);
+    return n->initval;
+}
+
+Type *node_totype(Node *n) {
+    assert(n->kind == AST_INIT);
+    return n->totype;
+}
+
 
 // AST_CONV
 
@@ -149,6 +205,11 @@ Node *ast_return(Node *retval) {
     n = ast_node(AST_RETURN, NULL);
     n->retval = retval;
     return n;
+}
+
+Node *node_retval(Node *n) {
+    assert(n->kind == AST_RETURN);
+    return n->retval;
 }
 
 
@@ -233,6 +294,10 @@ Type *node_type(Node *n) {
     return n->ty;
 }
 
+SourceLoc *node_loc(Node *n) {
+    return n->sourceLoc;
+}
+
 Node *node_operand(Node *n) {
     // TODO:  ensure we are only called on unary nodes
     return n->operand;
@@ -302,6 +367,35 @@ double node_literal_fval(Node *n) {
     return n->fval;
 }
 
+void node_set_flabel(Node *n, char *flabel) {
+    assert(n->kind == AST_LITERAL);
+    // TODO:  ensure n->ty is a floattype
+    n->flabel = flabel;
+}
+
+char *node_literal_flabel(Node *n) {
+    assert(n->kind == AST_LITERAL);
+    // TODO:  ensure n->ty is a floattype
+    return n->flabel;
+}
+
+char *node_literal_sval(Node *n) {
+    assert(n->kind == AST_LITERAL);
+    // TODO:  ensure n->ty is a string
+    return n->sval;
+}
+
+void node_set_slabel(Node *n, char *slabel) {
+    assert(n->kind == AST_LITERAL);
+    // TODO:  ensure n->ty is a string
+    n->slabel = slabel;
+}
+
+char *node_literal_slabel(Node *n) {
+    assert(n->kind == AST_LITERAL);
+    // TODO:  ensure n->ty is a string
+    return n->slabel;
+}
 
 // AST_LVAR and AST_GVAR
 
@@ -311,6 +405,7 @@ Node *ast_lvar(Type *ty, char *name, Vector *init) {
     n = ast_node(AST_LVAR, ty);
     n->varname = name;
     n->lvarinit = init;
+    // TODO:  do we need to initialize n->loff?
     return n;
 }
 
@@ -326,6 +421,31 @@ Node *ast_gvar(Type *ty, char *name, char *glabel) {
 char *node_varname(Node *n) {
     assert(n->kind == AST_LVAR || n->kind == AST_GVAR);
     return n->varname;
+}
+
+char *node_glabel(Node *n) {
+    assert(n->kind == AST_GVAR);
+    return n->glabel;
+}
+
+Vector *node_lvarinit(Node *n) {
+    assert(n->kind == AST_LVAR);
+    return n->lvarinit;
+}
+
+void node_set_lvarinit(Node *n, Vector *init) {
+    assert(n->kind == AST_LVAR);
+    n->lvarinit = init;
+}
+
+int node_loff(Node *n) {
+    assert(n->kind == AST_LVAR);
+    return n->loff;
+}
+
+void node_set_loff(Node *n, int off) {
+    assert(n->kind == AST_LVAR);
+    n->loff = off;
 }
 
 
