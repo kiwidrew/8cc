@@ -296,6 +296,36 @@ extern Type *type_ldouble;
 #define EMPTY_MAP ((Map){})
 #define EMPTY_VECTOR ((Vector){})
 
+// ast.c
+void ast_add_source(Node *n, SourceLoc *loc);
+Node *ast_uop(int kind, Type *ty, Node *operand);
+Node *ast_binop(Type *ty, int kind, Node *left, Node *right);
+Node *ast_inttype(Type *ty, long val);
+Node *ast_floattype(Type *ty, double val);
+Node *ast_lvar(Type *ty, char *name);
+Node *ast_gvar(Type *ty, char *name, char *glabel);
+Node *ast_typedef(Type *ty);
+Node *ast_string(Type *ty, char *sval);
+Node *ast_funcall(Type *ftype, char *fname, Vector *args);
+Node *ast_funcdesg(Type *ty, char *fname);
+Node *ast_funcptr_call(Node *fptr, Vector *args);
+Node *ast_func(Type *ty, char *fname, Vector *params, Node *body, Vector *localvars);
+Node *ast_decl(Node *var, Vector *init);
+Node *ast_init(Node *val, Type *totype, int off);
+Node *ast_conv(Type *totype, Node *val);
+Node *ast_if(Node *cond, Node *then, Node *els);
+Node *ast_ternary(Type *ty, Node *cond, Node *then, Node *els);
+Node *ast_return(Node *retval);
+Node *ast_compound_stmt(Vector *stmts);
+Node *ast_struct_ref(Type *ty, Node *struc, char *name);
+Node *ast_goto(char *label);
+Node *ast_jump(char *label);
+Node *ast_computed_goto(Node *expr);
+Node *ast_label(char *label);
+Node *ast_label_addr(Type *ty, char *label);
+Node *ast_dest(char *label);
+char *node2s(Node *node);
+
 // encoding.c
 Buffer *to_utf16(char *p, int len);
 Buffer *to_utf32(char *p, int len);
@@ -326,7 +356,6 @@ Token *read_token(void);
 
 // debug.c
 char *ty2s(Type *ty);
-char *node2s(Node *node);
 char *tok2s(Token *tok);
 
 // dict.c

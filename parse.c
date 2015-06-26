@@ -152,34 +152,10 @@ static Map *env() {
     return localenv ? localenv : globalenv;
 }
 
-static Node *make_ast(Node *tmpl) {
-    Node *r = calloc(1, sizeof(Node));
-    *r = *tmpl;
-    r->sourceLoc = source_loc;
-    return r;
-}
-
-static Node *ast_uop(int kind, Type *ty, Node *operand) {
-    return make_ast(&(Node){ kind, ty, .operand = operand });
-}
-
-static Node *ast_binop(Type *ty, int kind, Node *left, Node *right) {
-    Node *r = make_ast(&(Node){ kind, ty });
-    r->left = left;
-    r->right = right;
-    return r;
-}
-
-static Node *ast_inttype(Type *ty, long val) {
-    return make_ast(&(Node){ AST_LITERAL, ty, .ival = val });
-}
-
-static Node *ast_floattype(Type *ty, double val) {
-    return make_ast(&(Node){ AST_LITERAL, ty, .fval = val });
-}
-
-static Node *ast_lvar(Type *ty, char *name) {
-    Node *r = make_ast(&(Node){ AST_LVAR, ty, .varname = name });
+static Node *make_lvar(Type *ty, char *name) {
+    Node *r = ast_lvar(ty, name);
+    if (source_loc)
+        ast_add_source(r, source_loc);
     if (localenv)
         map_put(localenv, name, r);
     if (localvars)
@@ -187,30 +163,34 @@ static Node *ast_lvar(Type *ty, char *name) {
     return r;
 }
 
-static Node *ast_gvar(Type *ty, char *name) {
-    Node *r = make_ast(&(Node){ AST_GVAR, ty, .varname = name, .glabel = name });
+static Node *make_gvar(Type *ty, char *name) {
+    char *glabel = name;
+    Node *r = ast_gvar(ty, name, glabel);
+    if (source_loc)
+        ast_add_source(r, source_loc);
     map_put(globalenv, name, r);
     return r;
 }
 
-static Node *ast_static_lvar(Type *ty, char *name) {
-    Node *r = make_ast(&(Node){
-        .kind = AST_GVAR,
-        .ty = ty,
-        .varname = name,
-        .glabel = make_static_label(name) });
+static Node *make_static_lvar(Type *ty, char *name) {
+    char *glabel = make_static_label(name);
+    Node *r = ast_gvar(ty, name, glabel);
+    if (source_loc)
+        ast_add_source(r, source_loc);
     assert(localenv);
     map_put(localenv, name, r);
     return r;
 }
 
-static Node *ast_typedef(Type *ty, char *name) {
-    Node *r = make_ast(&(Node){ AST_TYPEDEF, ty });
+static Node *make_typedef(Type *ty, char *name) {
+    Node *r = ast_typedef(ty);
+    if (source_loc)
+        ast_add_source(r, source_loc);
     map_put(env(), name, r);
     return r;
 }
 
-static Node *ast_string(int enc, char *str, int len) {
+static Node *make_string(int enc, char *str, int len) {
     Type *ty;
     char *body;
 
@@ -234,96 +214,17 @@ static Node *ast_string(int enc, char *str, int len) {
         break;
     }
     }
-    return make_ast(&(Node){ AST_LITERAL, .ty = ty, .sval = body });
+
+    Node *r = ast_string(ty, body);
+    if (source_loc)
+        ast_add_source(r, source_loc);
+    return r;
 }
 
-static Node *ast_funcall(Type *ftype, char *fname, Vector *args) {
-    return make_ast(&(Node){
-        .kind = AST_FUNCALL,
-        .ty = ftype->rettype,
-        .fname = fname,
-        .args = args,
-        .ftype = ftype });
-}
-
-static Node *ast_funcdesg(Type *ty, char *fname) {
-    return make_ast(&(Node){ AST_FUNCDESG, ty, .fname = fname });
-}
-
-static Node *ast_funcptr_call(Node *fptr, Vector *args) {
-    assert(fptr->ty->kind == KIND_PTR);
-    assert(fptr->ty->ptr->kind == KIND_FUNC);
-    return make_ast(&(Node){
-        .kind = AST_FUNCPTR_CALL,
-        .ty = fptr->ty->ptr->rettype,
-        .fptr = fptr,
-        .args = args });
-}
-
-static Node *ast_func(Type *ty, char *fname, Vector *params, Node *body, Vector *localvars) {
-    return make_ast(&(Node){
-        .kind = AST_FUNC,
-        .ty = ty,
-        .fname = fname,
-        .params = params,
-        .localvars = localvars,
-        .body = body});
-}
-
-static Node *ast_decl(Node *var, Vector *init) {
-    return make_ast(&(Node){ AST_DECL, .declvar = var, .declinit = init });
-}
-
-static Node *ast_init(Node *val, Type *totype, int off) {
-    return make_ast(&(Node){ AST_INIT, .initval = val, .initoff = off, .totype = totype });
-}
-
-static Node *ast_conv(Type *totype, Node *val) {
-    return make_ast(&(Node){ AST_CONV, totype, .operand = val });
-}
-
-static Node *ast_if(Node *cond, Node *then, Node *els) {
-    return make_ast(&(Node){ AST_IF, .cond = cond, .then = then, .els = els });
-}
-
-static Node *ast_ternary(Type *ty, Node *cond, Node *then, Node *els) {
-    return make_ast(&(Node){ AST_TERNARY, ty, .cond = cond, .then = then, .els = els });
-}
-
-static Node *ast_return(Node *retval) {
-    return make_ast(&(Node){ AST_RETURN, .retval = retval });
-}
-
-static Node *ast_compound_stmt(Vector *stmts) {
-    return make_ast(&(Node){ AST_COMPOUND_STMT, .stmts = stmts });
-}
-
-static Node *ast_struct_ref(Type *ty, Node *struc, char *name) {
-    return make_ast(&(Node){ AST_STRUCT_REF, ty, .struc = struc, .field = name });
-}
-
-static Node *ast_goto(char *label) {
-    return make_ast(&(Node){ AST_GOTO, .label = label });
-}
-
-static Node *ast_jump(char *label) {
-    return make_ast(&(Node){ AST_GOTO, .label = label, .newlabel = label });
-}
-
-static Node *ast_computed_goto(Node *expr) {
-    return make_ast(&(Node){ AST_COMPUTED_GOTO, .operand = expr });
-}
-
-static Node *ast_label(char *label) {
-    return make_ast(&(Node){ AST_LABEL, .label = label });
-}
-
-static Node *ast_dest(char *label) {
-    return make_ast(&(Node){ AST_LABEL, .label = label, .newlabel = label });
-}
-
-static Node *ast_label_addr(char *label) {
-    return make_ast(&(Node){ OP_LABEL_ADDR, make_ptr_type(type_void), .label = label });
+static Node *make_label_addr(char *label) {
+    Type *ty = make_ptr_type(type_void);
+    Node *r = ast_label_addr(ty, label);
+    return r;
 }
 
 static Type *make_type(Type *tmpl) {
@@ -985,7 +886,7 @@ static Node *read_primary_expr() {
     case TCHAR:
         return ast_inttype(char_type(tok->enc), tok->c);
     case TSTRING:
-        return ast_string(tok->enc, tok->sval, tok->slen);
+        return make_string(tok->enc, tok->sval, tok->slen);
     case TKEYWORD:
         unget_token(tok);
         return NULL;
@@ -1060,7 +961,7 @@ static Node *read_label_addr(Token *tok) {
     Token *tok2 = get();
     if (tok2->kind != TIDENT)
         errort(tok, "label name expected after &&, but got %s", tok2s(tok2));
-    Node *r = ast_label_addr(tok2->sval);
+    Node *r = make_label_addr(tok2->sval);
     vec_push(gotos, r);
     return r;
 }
@@ -1128,7 +1029,7 @@ static Node *read_unary_expr() {
 static Node *read_compound_literal(Type *ty) {
     char *name = make_label();
     Vector *init = read_decl_init(ty);
-    Node *r = ast_lvar(ty, name);
+    Node *r = make_lvar(ty, name);
     r->lvarinit = init;
     return r;
 }
@@ -1855,7 +1756,7 @@ static void read_declarator_params(Vector *types, Vector *vars, bool *ellipsis) 
         ensure_not_void(ty);
         vec_push(types, ty);
         if (!typeonly)
-            vec_push(vars, ast_lvar(ty, name));
+            vec_push(vars, make_lvar(ty, name));
         tok = get();
         if (is_keyword(tok, ')'))
             return;
@@ -1870,7 +1771,7 @@ static void read_declarator_params_oldstyle(Vector *vars) {
         Token *tok = get();
         if (tok->kind != TIDENT)
             errort(tok, "identifier expected, but got %s", tok2s(tok));
-        vec_push(vars, ast_lvar(type_int, tok->sval));
+        vec_push(vars, make_lvar(type_int, tok->sval));
         if (next_token(')'))
             return;
         if (!next_token(','))
@@ -2149,7 +2050,7 @@ static Type *read_decl_spec(int *rsclass) {
  */
 
 static void read_static_local_var(Type *ty, char *name) {
-    Node *var = ast_static_lvar(ty, name);
+    Node *var = make_static_lvar(ty, name);
     Vector *init = NULL;
     if (next_token('=')) {
         Map *orig = localenv;
@@ -2177,13 +2078,13 @@ static void read_decl(Vector *block, bool isglobal) {
         Type *ty = read_declarator(&name, copy_incomplete_type(basetype), NULL, DECL_BODY);
         ty->isstatic = (sclass == S_STATIC);
         if (sclass == S_TYPEDEF) {
-            ast_typedef(ty, name);
+            make_typedef(ty, name);
         } else if (ty->isstatic && !isglobal) {
             ensure_not_void(ty);
             read_static_local_var(ty, name);
         } else {
             ensure_not_void(ty);
-            Node *var = (isglobal ? ast_gvar : ast_lvar)(ty, name);
+            Node *var = (isglobal ? make_gvar : make_lvar)(ty, name);
             if (next_token('=')) {
                 vec_push(block, ast_decl(var, read_decl_init(ty)));
             } else if (sclass != S_EXTERN && ty->kind != KIND_FUNC) {
@@ -2257,7 +2158,7 @@ static Node *read_func_body(Type *functype, char *fname, Vector *params) {
     localenv = make_map_parent(localenv);
     localvars = make_vector();
     current_func_type = functype;
-    Node *funcname = ast_string(ENC_NONE, fname, strlen(fname) + 1);
+    Node *funcname = make_string(ENC_NONE, fname, strlen(fname) + 1);
     map_put(localenv, "__func__", funcname);
     map_put(localenv, "__FUNCTION__", funcname);
     Node *body = read_compound_stmt();
@@ -2346,7 +2247,7 @@ static Node *read_funcdef() {
         functype->params = param_types(params);
     }
     functype->isstatic = (sclass == S_STATIC);
-    ast_gvar(functype, name);
+    make_gvar(functype, name);
     expect('{');
     Node *r = read_func_body(functype, name, params);
     backfill_labels();
@@ -2535,7 +2436,7 @@ static Node *read_switch_stmt() {
     SET_SWITCH_CONTEXT(end);
     Node *body = read_stmt();
     Vector *v = make_vector();
-    Node *var = ast_lvar(expr->ty, make_tempname());
+    Node *var = make_lvar(expr->ty, make_tempname());
     vec_push(v, ast_binop(expr->ty, '=', var, expr));
     for (int i = 0; i < vec_len(cases); i++)
         vec_push(v, make_switch_jump(var, vec_get(cases, i)));
@@ -2753,7 +2654,7 @@ static Token *peek() {
  */
 
 static void define_builtin(char *name, Type *rettype, Vector *paramtypes) {
-    ast_gvar(make_func_type(rettype, paramtypes, true, false), name);
+    make_gvar(make_func_type(rettype, paramtypes, true, false), name);
 }
 
 void parse_init() {
