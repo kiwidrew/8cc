@@ -153,7 +153,18 @@ static Map *env() {
 }
 
 static Node *make_lvar(Type *ty, char *name) {
-    Node *r = ast_lvar(ty, name);
+    Node *r = ast_lvar(ty, name, NULL);
+    if (source_loc)
+        ast_add_source(r, source_loc);
+    if (localenv)
+        map_put(localenv, name, r);
+    if (localvars)
+        vec_push(localvars, r);
+    return r;
+}
+
+static Node *make_lvar_init(Type *ty, char *name, Vector *init) {
+    Node *r = ast_lvar(ty, name, init);
     if (source_loc)
         ast_add_source(r, source_loc);
     if (localenv)
@@ -324,7 +335,7 @@ static bool is_string(Type *ty) {
 }
 
 static void ensure_lvalue(Node *node) {
-    switch (node->kind) {
+    switch (node_kind(node)) {
     case AST_LVAR: case AST_GVAR: case AST_DEREF: case AST_STRUCT_REF:
         return;
     default:
@@ -333,12 +344,12 @@ static void ensure_lvalue(Node *node) {
 }
 
 static void ensure_inttype(Node *node) {
-    if (!is_inttype(node->ty))
+    if (!is_inttype(node_type(node)))
         error("integer type expected, but got %s", node2s(node));
 }
 
 static void ensure_arithtype(Node *node) {
-    if (!is_arithtype(node->ty))
+    if (!is_arithtype(node_type(node)))
         error("arithmetic type expected, but got %s", node2s(node));
 }
 
@@ -360,7 +371,7 @@ static Type *copy_incomplete_type(Type *ty) {
 
 static Type *get_typedef(char *name) {
     Node *node = map_get(env(), name);
-    return (node && node->kind == AST_TYPEDEF) ? node->ty : NULL;
+    return (node && node_kind(node) == AST_TYPEDEF) ? node_type(node) : NULL;
 }
 
 static bool is_type(Token *tok) {
@@ -401,7 +412,7 @@ void *make_pair(void *first, void *second) {
 static Node *conv(Node *node) {
     if (!node)
         return NULL;
-    Type *ty = node->ty;
+    Type *ty = node_type(node);
     switch (ty->kind) {
     case KIND_ARRAY:
         // C11 6.3.2.1p3: An array of T is converted to a pointer to T.
@@ -424,7 +435,7 @@ static bool same_arith_type(Type *t, Type *u) {
 }
 
 static Node *wrap(Type *t, Node *node) {
-    if (same_arith_type(t, node->ty))
+    if (same_arith_type(t, node_type(node)))
         return node;
     return ast_uop(AST_CONV, t, node);
 }
@@ -463,8 +474,11 @@ static bool valid_pointer_binop(int op) {
     }
 }
 
-static Node *binop(int op, Node *lhs, Node *rhs) {
-    if (lhs->ty->kind == KIND_PTR && rhs->ty->kind == KIND_PTR) {
+static Node *binop(int op, Node *lhs, Node *rhs, Type *r) {
+    Type *lhs_ty = node_type(lhs);
+    Type *rhs_ty = node_type(rhs);
+
+    if (lhs_ty->kind == KIND_PTR && rhs_ty->kind == KIND_PTR) {
         if (!valid_pointer_binop(op))
             error("invalid pointer arith");
         // C11 6.5.6.9: Pointer subtractions have type ptrdiff_t.
@@ -473,13 +487,15 @@ static Node *binop(int op, Node *lhs, Node *rhs) {
         // C11 6.5.8.6, 6.5.9.3: Pointer comparisons have type int.
         return ast_binop(type_int, op, lhs, rhs);
     }
-    if (lhs->ty->kind == KIND_PTR)
-        return ast_binop(lhs->ty, op, lhs, rhs);
-    if (rhs->ty->kind == KIND_PTR)
-        return ast_binop(rhs->ty, op, rhs, lhs);
-    assert(is_arithtype(lhs->ty));
-    assert(is_arithtype(rhs->ty));
-    Type *r = usual_arith_conv(lhs->ty, rhs->ty);
+    if (lhs_ty->kind == KIND_PTR)
+        return ast_binop(lhs_ty, op, lhs, rhs);
+    if (rhs_ty->kind == KIND_PTR)
+        return ast_binop(rhs_ty, op, rhs, lhs);
+    assert(is_arithtype(lhs_ty));
+    assert(is_arithtype(rhs_ty));
+
+    if (r == NULL)
+        r = usual_arith_conv(lhs_ty, rhs_ty);
     return ast_binop(r, op, wrap(r, lhs), wrap(r, rhs));
 }
 
@@ -523,24 +539,27 @@ static void ensure_assignable(Type *totype, Type *fromtype) {
  */
 
 static int eval_struct_ref(Node *node, int offset) {
-    if (node->kind == AST_STRUCT_REF)
-        return eval_struct_ref(node->struc, node->ty->offset + offset);
+    if (node_kind(node) == AST_STRUCT_REF) {
+        Node *struc = node_struct_ref_struc(node);
+        Type *struc_ty = node_type(node);
+        return eval_struct_ref(struc, struc_ty->offset + offset);
+    }
     return eval_intexpr(node, NULL) + offset;
 }
 
 int eval_intexpr(Node *node, Node **addr) {
-    switch (node->kind) {
+    switch (node_kind(node)) {
     case AST_LITERAL:
-        if (is_inttype(node->ty))
-            return node->ival;
+        if (is_inttype(node_type(node)))
+            return node_literal_ival(node);
         error("Integer expression expected, but got %s", node2s(node));
-    case '!': return !eval_intexpr(node->operand, addr);
-    case '~': return ~eval_intexpr(node->operand, addr);
-    case OP_CAST: return eval_intexpr(node->operand, addr);
-    case AST_CONV: return eval_intexpr(node->operand, addr);
+    case '!': return !eval_intexpr(node_operand(node), addr);
+    case '~': return ~eval_intexpr(node_operand(node), addr);
+    case OP_CAST: return eval_intexpr(node_operand(node), addr);
+    case AST_CONV: return eval_intexpr(node_operand(node), addr);
     case AST_ADDR:
-        if (node->operand->kind == AST_STRUCT_REF)
-            return eval_struct_ref(node->operand, 0);
+        if (node_kind(node_operand(node)) == AST_STRUCT_REF)
+            return eval_struct_ref(node_operand(node), 0);
         // fallthrough
     case AST_GVAR:
         if (addr) {
@@ -550,17 +569,17 @@ int eval_intexpr(Node *node, Node **addr) {
         goto error;
         goto error;
     case AST_DEREF:
-        if (node->operand->ty->kind == KIND_PTR)
-            return eval_intexpr(node->operand, addr);
+        if (node_type(node_operand(node))->kind == KIND_PTR)
+            return eval_intexpr(node_operand(node), addr);
         goto error;
     case AST_TERNARY: {
-        long cond = eval_intexpr(node->cond, addr);
+        long cond = eval_intexpr(node_cond(node), addr);
         if (cond)
-            return node->then ? eval_intexpr(node->then, addr) : cond;
-        return eval_intexpr(node->els, addr);
+            return node_then(node) ? eval_intexpr(node_then(node), addr) : cond;
+        return eval_intexpr(node_els(node), addr);
     }
-#define L (eval_intexpr(node->left, addr))
-#define R (eval_intexpr(node->right, addr))
+#define L (eval_intexpr(node_left(node), addr))
+#define R (eval_intexpr(node_right(node), addr))
     case '+': return L + R;
     case '-': return L - R;
     case '*': return L * R;
@@ -666,7 +685,7 @@ static Type *read_sizeof_operand_sub() {
         return r;
     }
     unget_token(tok);
-    return read_unary_expr()->ty;
+    return node_type(read_unary_expr());
 }
 
 static Node *read_sizeof_operand() {
@@ -702,12 +721,12 @@ static Vector *read_func_args(Vector *params) {
         if (i < vec_len(params)) {
             paramtype = vec_get(params, i++);
         } else {
-            paramtype = is_flotype(arg->ty) ? type_double :
-                is_inttype(arg->ty) ? type_int :
-                arg->ty;
+            paramtype = is_flotype(node_type(arg)) ? type_double :
+                is_inttype(node_type(arg)) ? type_int :
+                node_type(arg);
         }
-        ensure_assignable(paramtype, arg->ty);
-        if (paramtype->kind != arg->ty->kind)
+        ensure_assignable(paramtype, node_type(arg));
+        if (paramtype->kind != node_type(arg)->kind)
             arg = ast_conv(paramtype, arg);
         vec_push(args, arg);
         Token *tok = get();
@@ -719,12 +738,12 @@ static Vector *read_func_args(Vector *params) {
 }
 
 static Node *read_funcall(Node *fp) {
-    if (fp->kind == AST_ADDR && fp->operand->kind == AST_FUNCDESG) {
-        Node *desg = fp->operand;
-        Vector *args = read_func_args(desg->ty->params);
-        return ast_funcall(desg->ty, desg->fname, args);
+    if (node_kind(fp) == AST_ADDR && node_kind(node_operand(fp)) == AST_FUNCDESG) {
+        Node *desg = node_operand(fp);
+        Vector *args = read_func_args(node_type(desg)->params);
+        return ast_funcall(node_type(desg), node_fname(desg), args);
     }
-    Vector *args = read_func_args(fp->ty->ptr->params);
+    Vector *args = read_func_args(node_type(fp)->ptr->params);
     return ast_funcptr_call(fp, args);
 }
 
@@ -776,11 +795,11 @@ static Node *read_generic() {
         void **pair = vec_get(list, i);
         Type *ty = pair[0];
         Node *expr = pair[1];
-        if (type_compatible(contexpr->ty, ty))
+        if (type_compatible(node_type(contexpr), ty))
             return expr;
     }
    if (!defaultexpr)
-       errort(tok, "no matching generic selection for %s: %s", node2s(contexpr), ty2s(contexpr->ty));
+       errort(tok, "no matching generic selection for %s: %s", node2s(contexpr), ty2s(node_type(contexpr)));
    return defaultexpr;
 }
 
@@ -815,8 +834,8 @@ static Node *read_var_or_func(char *name) {
         warnt(tok, "assume returning int: %s()", name);
         return ast_funcdesg(ty, name);
     }
-    if (v->ty->kind == KIND_FUNC)
-        return ast_funcdesg(v->ty, name);
+    if (node_type(v)->kind == KIND_FUNC)
+        return ast_funcdesg(node_type(v), name);
     return v;
 }
 
@@ -843,12 +862,12 @@ static Node *read_stmt_expr() {
     Node *r = read_compound_stmt();
     expect(')');
     Type *rtype = type_void;
-    if (vec_len(r->stmts) > 0) {
-        Node *lastexpr = vec_tail(r->stmts);
-        if (lastexpr->ty)
-            rtype = lastexpr->ty;
+    if (vec_len(node_stmts(r)) > 0) {
+        Node *lastexpr = vec_tail(node_stmts(r));
+        if (node_type(lastexpr))
+            rtype = node_type(lastexpr);
     }
-    r->ty = rtype;
+    node_set_type(r, rtype);
     return r;
 }
 
@@ -901,8 +920,8 @@ static Node *read_subscript_expr(Node *node) {
     if (!sub)
         errort(tok, "subscription expected");
     expect(']');
-    Node *t = binop('+', conv(node), conv(sub));
-    return ast_uop(AST_DEREF, t->ty->ptr, t);
+    Node *t = binop('+', conv(node), conv(sub), NULL);
+    return ast_uop(AST_DEREF, node_type(t)->ptr, t);
 }
 
 static Node *read_postfix_expr_tail(Node *node) {
@@ -911,7 +930,7 @@ static Node *read_postfix_expr_tail(Node *node) {
         if (next_token('(')) {
             Token *tok = peek();
             node = conv(node);
-            Type *t = node->ty;
+            Type *t = node_type(node);
             if (t->kind != KIND_PTR || t->ptr->kind != KIND_FUNC)
                 errort(tok, "function expected, but got %s", node2s(node));
             node = read_funcall(node);
@@ -926,10 +945,11 @@ static Node *read_postfix_expr_tail(Node *node) {
             continue;
         }
         if (next_token(OP_ARROW)) {
-            if (node->ty->kind != KIND_PTR)
+            Type *node_ty = node_type(node);
+            if (node_ty->kind != KIND_PTR)
                 error("pointer type expected, but got %s %s",
-                      ty2s(node->ty), node2s(node));
-            node = ast_uop(AST_DEREF, node->ty->ptr, node);
+                      ty2s(node_ty), node2s(node));
+            node = ast_uop(AST_DEREF, node_ty->ptr, node);
             node = read_struct_field(node);
             continue;
         }
@@ -937,7 +957,7 @@ static Node *read_postfix_expr_tail(Node *node) {
         if (next_token(OP_INC) || next_token(OP_DEC)) {
             ensure_lvalue(node);
             int op = is_keyword(tok, OP_INC) ? OP_POST_INC : OP_POST_DEC;
-            return ast_uop(op, node->ty, node);
+            return ast_uop(op, node_type(node), node);
         }
         return node;
     }
@@ -952,7 +972,7 @@ static Node *read_unary_incdec(int op) {
     Node *operand = read_unary_expr();
     operand = conv(operand);
     ensure_lvalue(operand);
-    return ast_uop(op, operand->ty, operand);
+    return ast_uop(op, node_type(operand), operand);
 }
 
 static Node *read_label_addr(Token *tok) {
@@ -968,35 +988,38 @@ static Node *read_label_addr(Token *tok) {
 
 static Node *read_unary_addr() {
     Node *operand = read_cast_expr();
-    if (operand->kind == AST_FUNCDESG)
+    if (node_kind(operand) == AST_FUNCDESG)
         return conv(operand);
     ensure_lvalue(operand);
-    return ast_uop(AST_ADDR, make_ptr_type(operand->ty), operand);
+    return ast_uop(AST_ADDR, make_ptr_type(node_type(operand)), operand);
 }
 
 static Node *read_unary_deref(Token *tok) {
     Node *operand = conv(read_cast_expr());
-    if (operand->ty->kind != KIND_PTR)
+    Type *operand_ty = node_type(operand);
+    if (operand_ty->kind != KIND_PTR)
         errort(tok, "pointer type expected, but got %s", node2s(operand));
-    if (operand->ty->ptr->kind == KIND_FUNC)
+    if (operand_ty->ptr->kind == KIND_FUNC)
         return operand;
-    return ast_uop(AST_DEREF, operand->ty->ptr, operand);
+    return ast_uop(AST_DEREF, operand_ty->ptr, operand);
 }
 
 static Node *read_unary_minus() {
     Node *expr = read_cast_expr();
     ensure_arithtype(expr);
-    if (is_inttype(expr->ty))
-        return binop('-', conv(ast_inttype(expr->ty, 0)), conv(expr));
-    return binop('-', ast_floattype(expr->ty, 0), expr);
+    Type *expr_ty = node_type(expr);
+    if (is_inttype(expr_ty))
+        return binop('-', conv(ast_inttype(expr_ty, 0)), conv(expr), NULL);
+    return binop('-', ast_floattype(expr_ty, 0), expr, NULL);
 }
 
 static Node *read_unary_bitnot(Token *tok) {
     Node *expr = read_cast_expr();
     expr = conv(expr);
-    if (!is_inttype(expr->ty))
+    Type *expr_ty = node_type(expr);
+    if (!is_inttype(expr_ty))
         errort(tok, "invalid use of ~: %s", node2s(expr));
-    return ast_uop('~', expr->ty, expr);
+    return ast_uop('~', expr_ty, expr);
 }
 
 static Node *read_unary_lognot() {
@@ -1029,8 +1052,7 @@ static Node *read_unary_expr() {
 static Node *read_compound_literal(Type *ty) {
     char *name = make_label();
     Vector *init = read_decl_init(ty);
-    Node *r = make_lvar(ty, name);
-    r->lvarinit = init;
+    Node *r = make_lvar_init(ty, name, init);
     return r;
 }
 
@@ -1056,9 +1078,9 @@ static Node *read_cast_expr() {
 static Node *read_multiplicative_expr() {
     Node *node = read_cast_expr();
     for (;;) {
-        if (next_token('*'))      node = binop('*', conv(node), conv(read_cast_expr()));
-        else if (next_token('/')) node = binop('/', conv(node), conv(read_cast_expr()));
-        else if (next_token('%')) node = binop('%', conv(node), conv(read_cast_expr()));
+        if (next_token('*'))      node = binop('*', conv(node), conv(read_cast_expr()), NULL);
+        else if (next_token('/')) node = binop('/', conv(node), conv(read_cast_expr()), NULL);
+        else if (next_token('%')) node = binop('%', conv(node), conv(read_cast_expr()), NULL);
         else    return node;
     }
 }
@@ -1066,8 +1088,8 @@ static Node *read_multiplicative_expr() {
 static Node *read_additive_expr() {
     Node *node = read_multiplicative_expr();
     for (;;) {
-        if      (next_token('+')) node = binop('+', conv(node), conv(read_multiplicative_expr()));
-        else if (next_token('-')) node = binop('-', conv(node), conv(read_multiplicative_expr()));
+        if      (next_token('+')) node = binop('+', conv(node), conv(read_multiplicative_expr()), NULL);
+        else if (next_token('-')) node = binop('-', conv(node), conv(read_multiplicative_expr()), NULL);
         else    return node;
     }
 }
@@ -1079,13 +1101,13 @@ static Node *read_shift_expr() {
         if (next_token(OP_SAL))
             op = OP_SAL;
         else if (next_token(OP_SAR))
-            op = node->ty->usig ? OP_SHR : OP_SAR;
+            op = node_type(node)->usig ? OP_SHR : OP_SAR;
         else
             break;
         Node *right = read_additive_expr();
         ensure_inttype(node);
         ensure_inttype(right);
-        node = ast_binop(node->ty, op, conv(node), conv(right));
+        node = ast_binop(node_type(node), op, conv(node), conv(right));
     }
     return node;
 }
@@ -1093,12 +1115,11 @@ static Node *read_shift_expr() {
 static Node *read_relational_expr() {
     Node *node = read_shift_expr();
     for (;;) {
-        if      (next_token('<'))   node = binop('<',   conv(node), conv(read_shift_expr()));
-        else if (next_token('>'))   node = binop('<',   conv(read_shift_expr()), conv(node));
-        else if (next_token(OP_LE)) node = binop(OP_LE, conv(node), conv(read_shift_expr()));
-        else if (next_token(OP_GE)) node = binop(OP_LE, conv(read_shift_expr()), conv(node));
+        if      (next_token('<'))   node = binop('<',   conv(node), conv(read_shift_expr()), type_int);
+        else if (next_token('>'))   node = binop('<',   conv(read_shift_expr()), conv(node), type_int);
+        else if (next_token(OP_LE)) node = binop(OP_LE, conv(node), conv(read_shift_expr()), type_int);
+        else if (next_token(OP_GE)) node = binop(OP_LE, conv(read_shift_expr()), conv(node), type_int);
         else    return node;
-        node->ty = type_int;
     }
 }
 
@@ -1106,34 +1127,33 @@ static Node *read_equality_expr() {
     Node *node = read_relational_expr();
     Node *r;
     if (next_token(OP_EQ)) {
-        r = binop(OP_EQ, conv(node), conv(read_equality_expr()));
+        r = binop(OP_EQ, conv(node), conv(read_equality_expr()), type_int);
     } else if (next_token(OP_NE)) {
-        r = binop(OP_NE, conv(node), conv(read_equality_expr()));
+        r = binop(OP_NE, conv(node), conv(read_equality_expr()), type_int);
     } else {
         return node;
     }
-    r->ty = type_int;
     return r;
 }
 
 static Node *read_bitand_expr() {
     Node *node = read_equality_expr();
     while (next_token('&'))
-        node = binop('&', conv(node), conv(read_equality_expr()));
+        node = binop('&', conv(node), conv(read_equality_expr()), NULL);
     return node;
 }
 
 static Node *read_bitxor_expr() {
     Node *node = read_bitand_expr();
     while (next_token('^'))
-        node = binop('^', conv(node), conv(read_bitand_expr()));
+        node = binop('^', conv(node), conv(read_bitand_expr()), NULL);
     return node;
 }
 
 static Node *read_bitor_expr() {
     Node *node = read_bitxor_expr();
     while (next_token('|'))
-        node = binop('|', conv(node), conv(read_bitxor_expr()));
+        node = binop('|', conv(node), conv(read_bitxor_expr()), NULL);
     return node;
 }
 
@@ -1156,8 +1176,8 @@ static Node *do_read_conditional_expr(Node *cond) {
     expect(':');
     Node *els = conv(read_conditional_expr());
     // [GNU] Omitting the middle operand is allowed.
-    Type *t = then ? then->ty : cond->ty;
-    Type *u = els->ty;
+    Type *t = then ? node_type(then) : node_type(cond);
+    Type *u = node_type(els);
     // C11 6.5.15p5: if both types are arithemtic type, the result
     // type is the result of the usual arithmetic conversions.
     if (is_arithtype(t) && is_arithtype(u)) {
@@ -1183,13 +1203,14 @@ static Node *read_assignment_expr() {
         return do_read_conditional_expr(node);
     int cop = get_compound_assign_op(tok);
     if (is_keyword(tok, '=') || cop) {
+        Type *node_ty = node_type(node);
         Node *value = conv(read_assignment_expr());
         if (is_keyword(tok, '=') || cop)
             ensure_lvalue(node);
-        Node *right = cop ? binop(cop, conv(node), value) : value;
-        if (is_arithtype(node->ty) && node->ty->kind != right->ty->kind)
-            right = ast_conv(node->ty, right);
-        return ast_binop(node->ty, '=', node, right);
+        Node *right = cop ? binop(cop, conv(node), value, NULL) : value;
+        if (is_arithtype(node_ty) && node_ty->kind != node_type(right)->kind)
+            right = ast_conv(node_ty, right);
+        return ast_binop(node_ty, '=', node, right);
     }
     unget_token(tok);
     return node;
@@ -1199,7 +1220,7 @@ static Node *read_comma_expr() {
     Node *node = read_assignment_expr();
     while (next_token(',')) {
         Node *expr = read_assignment_expr();
-        node = ast_binop(expr->ty, ',', node, expr);
+        node = ast_binop(node_type(expr), ',', node, expr);
     }
     return node;
 }
@@ -1221,12 +1242,12 @@ static Node *read_expr_opt() {
  */
 
 static Node *read_struct_field(Node *struc) {
-    if (struc->ty->kind != KIND_STRUCT)
+    if (node_type(struc)->kind != KIND_STRUCT)
         error("struct expected, but got %s", node2s(struc));
     Token *name = get();
     if (name->kind != TIDENT)
         error("field name expected, but got %s", tok2s(name));
-    Type *field = dict_get(struc->ty->fields, name->sval);
+    Type *field = dict_get(node_type(struc)->fields, name->sval);
     if (!field)
         error("struct has no such field: %s", tok2s(name));
     return ast_struct_ref(field, struc, name->sval);
@@ -1544,14 +1565,14 @@ static void read_initializer_elem(Vector *inits, Type *ty, int off, bool designa
         expect('}');
     } else {
         Node *expr = conv(read_assignment_expr());
-        ensure_assignable(ty, expr->ty);
+        ensure_assignable(ty, node_type(expr));
         vec_push(inits, ast_init(expr, ty, off));
     }
 }
 
 static int comp_init(const void *p, const void *q) {
-    int x = (*(Node **)p)->initoff;
-    int y = (*(Node **)q)->initoff;
+    int x = node_initoff(*(Node **)p);
+    int y = node_initoff(*(Node **)q);
     if (x < y) return -1;
     if (x > y) return 1;
     return 0;
@@ -1692,7 +1713,7 @@ static Vector *read_decl_init(Type *ty) {
         read_initializer_list(r, ty, 0, false);
     } else {
         Node *init = conv(read_assignment_expr());
-        if (is_arithtype(init->ty) && init->ty->kind != ty->kind)
+        if (is_arithtype(node_type(init)) && node_type(init)->kind != ty->kind)
             init = ast_conv(ty, init);
         vec_push(r, ast_init(init, ty, 0));
     }
@@ -1901,7 +1922,7 @@ static Type *read_typeof() {
     expect('(');
     Type *r = is_type(peek())
         ? read_cast_type()
-        : read_comma_expr()->ty;
+        : node_type(read_comma_expr());
     expect(')');
     return r;
 }
@@ -2120,18 +2141,18 @@ static Vector *read_oldstyle_param_args() {
 static void update_oldstyle_param_type(Vector *params, Vector *vars) {
     for (int i = 0; i < vec_len(vars); i++) {
         Node *decl = vec_get(vars, i);
-        assert(decl->kind == AST_DECL);
-        Node *var = decl->declvar;
-        assert(var->kind == AST_LVAR);
+        assert(node_kind(decl) == AST_DECL);
+        Node *var = node_declvar(decl);
+        assert(node_kind(var) == AST_LVAR);
         for (int j = 0; j < vec_len(params); j++) {
             Node *param = vec_get(params, j);
-            assert(param->kind == AST_LVAR);
-            if (strcmp(param->varname, var->varname))
+            assert(node_kind(param) == AST_LVAR);
+            if (strcmp(node_varname(param), node_varname(var)))
                 continue;
-            param->ty = var->ty;
+            node_set_type(param, node_type(var));
             goto found;
         }
-        error("missing parameter: %s", var->varname);
+        error("missing parameter: %s", node_varname(var));
     found:;
     }
 }
@@ -2145,7 +2166,7 @@ static Vector *param_types(Vector *params) {
     Vector *r = make_vector();
     for (int i = 0; i < vec_len(params); i++) {
         Node *param = vec_get(params, i);
-        vec_push(r, param->ty);
+        vec_push(r, node_type(param));
     }
     return r;
 }
@@ -2220,14 +2241,17 @@ static bool is_funcdef() {
 static void backfill_labels() {
     for (int i = 0; i < vec_len(gotos); i++) {
         Node *src = vec_get(gotos, i);
-        char *label = src->label;
+        char *label = node_label(src);
         Node *dst = map_get(labels, label);
         if (!dst)
-            error("stray %s: %s", src->kind == AST_GOTO ? "goto" : "unary &&", label);
-        if (dst->newlabel)
-            src->newlabel = dst->newlabel;
-        else
-            src->newlabel = dst->newlabel = make_label();
+            error("stray %s: %s", node_kind(src) == AST_GOTO ? "goto" : "unary &&", label);
+        if (node_newlabel(dst))
+            node_set_newlabel(src, node_newlabel(dst));
+        else {
+            char *newlabel = make_label();
+            node_set_newlabel(src, newlabel);
+            node_set_newlabel(dst, newlabel);
+        }
     }
 }
 
@@ -2261,7 +2285,7 @@ static Node *read_funcdef() {
 
 static Node *read_boolean_expr() {
     Node *cond = read_expr();
-    return is_flotype(cond->ty) ? ast_conv(type_bool, cond) : cond;
+    return is_flotype(node_type(cond)) ? ast_conv(type_bool, cond) : cond;
 }
 
 static Node *read_if_stmt() {
@@ -2306,7 +2330,7 @@ static Node *read_for_stmt() {
     localenv = make_map_parent(localenv);
     Node *init = read_opt_decl_or_stmt();
     Node *cond = read_expr_opt();
-    if (cond && is_flotype(cond->ty))
+    if (cond && is_flotype(node_type(cond)))
         cond = ast_conv(type_bool, cond);
     expect(';');
     Node *step = read_expr_opt();
@@ -2436,8 +2460,8 @@ static Node *read_switch_stmt() {
     SET_SWITCH_CONTEXT(end);
     Node *body = read_stmt();
     Vector *v = make_vector();
-    Node *var = make_lvar(expr->ty, make_tempname());
-    vec_push(v, ast_binop(expr->ty, '=', var, expr));
+    Node *var = make_lvar(node_type(expr), make_tempname());
+    vec_push(v, ast_binop(node_type(expr), '=', var, expr));
     for (int i = 0; i < vec_len(cases); i++)
         vec_push(v, make_switch_jump(var, vec_get(cases, i)));
     vec_push(v, ast_jump(defaultcase ? defaultcase : end));
@@ -2515,7 +2539,7 @@ static Node *read_goto_stmt() {
         // [GNU] computed goto. "goto *p" jumps to the address pointed by p.
         Token *tok = peek();
         Node *expr = read_cast_expr();
-        if (expr->ty->kind != KIND_PTR)
+        if (node_type(expr)->kind != KIND_PTR)
             errort(tok, "pointer expected for computed goto, but got %s", node2s(expr));
         return ast_computed_goto(expr);
     }

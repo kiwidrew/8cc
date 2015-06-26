@@ -194,89 +194,6 @@ typedef struct {
     int line;
 } SourceLoc;
 
-typedef struct Node {
-    int kind;
-    Type *ty;
-    SourceLoc *sourceLoc;
-    union {
-        // Char, int, or long
-        long ival;
-        // Float or double
-        struct {
-            double fval;
-            char *flabel;
-        };
-        // String
-        struct {
-            char *sval;
-            char *slabel;
-        };
-        // Local/global variable
-        struct {
-            char *varname;
-            // local
-            int loff;
-            Vector *lvarinit;
-            // global
-            char *glabel;
-        };
-        // Binary operator
-        struct {
-            struct Node *left;
-            struct Node *right;
-        };
-        // Unary operator
-        struct {
-            struct Node *operand;
-        };
-        // Function call or function declaration
-        struct {
-            char *fname;
-            // Function call
-            Vector *args;
-            struct Type *ftype;
-            // Function pointer or function designator
-            struct Node *fptr;
-            // Function declaration
-            Vector *params;
-            Vector *localvars;
-            struct Node *body;
-        };
-        // Declaration
-        struct {
-            struct Node *declvar;
-            Vector *declinit;
-        };
-        // Initializer
-        struct {
-            struct Node *initval;
-            int initoff;
-            Type *totype;
-        };
-        // If statement or ternary operator
-        struct {
-            struct Node *cond;
-            struct Node *then;
-            struct Node *els;
-        };
-        // Goto and label
-        struct {
-            char *label;
-            char *newlabel;
-        };
-        // Return statement
-        struct Node *retval;
-        // Compound statement
-        Vector *stmts;
-        // Struct reference
-        struct {
-            struct Node *struc;
-            char *field;
-            Type *fieldtype;
-        };
-    };
-} Node;
-
 extern Type *type_void;
 extern Type *type_bool;
 extern Type *type_char;
@@ -296,35 +213,60 @@ extern Type *type_ldouble;
 #define EMPTY_MAP ((Map){})
 #define EMPTY_VECTOR ((Vector){})
 
+// ast.h
+typedef struct Node Node;
+
 // ast.c
 void ast_add_source(Node *n, SourceLoc *loc);
+void node_set_type(Node *, Type *);
+void node_set_newlabel(Node *, char *);
+char *node2s(Node *node);
 Node *ast_uop(int kind, Type *ty, Node *operand);
 Node *ast_binop(Type *ty, int kind, Node *left, Node *right);
-Node *ast_inttype(Type *ty, long val);
-Node *ast_floattype(Type *ty, double val);
-Node *ast_lvar(Type *ty, char *name);
-Node *ast_gvar(Type *ty, char *name, char *glabel);
 Node *ast_typedef(Type *ty);
-Node *ast_string(Type *ty, char *sval);
 Node *ast_funcall(Type *ftype, char *fname, Vector *args);
 Node *ast_funcdesg(Type *ty, char *fname);
 Node *ast_funcptr_call(Node *fptr, Vector *args);
 Node *ast_func(Type *ty, char *fname, Vector *params, Node *body, Vector *localvars);
 Node *ast_decl(Node *var, Vector *init);
+Node *node_declvar(Node *);
+Vector *node_declinit(Node *);
 Node *ast_init(Node *val, Type *totype, int off);
+int node_initoff(Node *);
 Node *ast_conv(Type *totype, Node *val);
-Node *ast_if(Node *cond, Node *then, Node *els);
-Node *ast_ternary(Type *ty, Node *cond, Node *then, Node *els);
 Node *ast_return(Node *retval);
 Node *ast_compound_stmt(Vector *stmts);
-Node *ast_struct_ref(Type *ty, Node *struc, char *name);
+Vector *node_stmts(Node *);
 Node *ast_goto(char *label);
 Node *ast_jump(char *label);
 Node *ast_computed_goto(Node *expr);
 Node *ast_label(char *label);
 Node *ast_label_addr(Type *ty, char *label);
 Node *ast_dest(char *label);
-char *node2s(Node *node);
+int node_kind(Node *);
+Type *node_type(Node *);
+Node *node_operand(Node *);
+Node *node_left(Node *);
+Node *node_right(Node *);
+char *node_fname(Node *);
+char *node_label(Node *);
+char *node_newlabel(Node *);
+Node *ast_inttype(Type *ty, long val);
+Node *ast_floattype(Type *ty, double val);
+Node *ast_string(Type *ty, char *sval);
+long node_literal_ival(Node *);
+double node_literal_fval(Node *);
+Node *ast_lvar(Type *ty, char *name, Vector *init);
+Node *ast_gvar(Type *ty, char *name, char *glabel);
+char *node_varname(Node *);
+Node *ast_struct_ref(Type *ty, Node *struc, char *name);
+Node *node_struct_ref_struc(Node *);
+char *node_struct_ref_field(Node *);
+Node *ast_if(Node *cond, Node *then, Node *els);
+Node *ast_ternary(Type *ty, Node *cond, Node *then, Node *els);
+Node *node_cond(Node *);
+Node *node_then(Node *);
+Node *node_els(Node *);
 
 // encoding.c
 Buffer *to_utf16(char *p, int len);

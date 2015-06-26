@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "8cc.h"
+#include "ast.h"
 
 bool dumpstack = false;
 bool dumpsource = true;

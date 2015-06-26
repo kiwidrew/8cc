@@ -2,6 +2,7 @@
 
 
 #include "8cc.h"
+#include "ast.h"
 
 
 static Node *ast_node(int kind, Type *ty) {
@@ -16,6 +17,13 @@ static Node *ast_node(int kind, Type *ty) {
 void ast_add_source(Node *n, SourceLoc *loc) {
     n->sourceLoc = loc;
 }
+
+void node_set_type(Node *n, Type *ty) {
+    n->ty = ty;
+}
+
+
+/* Node constructors. */
 
 Node *ast_uop(int kind, Type *ty, Node *operand) {
     Node *n;
@@ -34,51 +42,10 @@ Node *ast_binop(Type *ty, int kind, Node *left, Node *right) {
     return n;
 }
 
-Node *ast_inttype(Type *ty, long val) {
-    Node *n;
-
-    n = ast_node(AST_LITERAL, ty);
-    n->ival = val;
-    return n;
-}
-
-Node *ast_floattype(Type *ty, double val) {
-    Node *n;
-
-    n = ast_node(AST_LITERAL, ty);
-    n->fval = val;
-    return n;
-}
-
-Node *ast_lvar(Type *ty, char *name) {
-    Node *n;
-
-    n = ast_node(AST_LVAR, ty);
-    n->varname = name;
-    return n;
-}
-
-Node *ast_gvar(Type *ty, char *name, char *glabel) {
-    Node *n;
-
-    n = ast_node(AST_GVAR, ty);
-    n->varname = name;
-    n->glabel = glabel;
-    return n;
-}
-
 Node *ast_typedef(Type *ty) {
     Node *n;
 
     n = ast_node(AST_TYPEDEF, ty);
-    return n;
-}
-
-Node *ast_string(Type *ty, char *sval) {
-    Node *n;
-
-    n = ast_node(AST_LITERAL, ty);
-    n->sval = sval;
     return n;
 }
 
@@ -122,6 +89,9 @@ Node *ast_func(Type *ty, char *fname, Vector *params, Node *body, Vector *localv
     return n;
 }
 
+
+// AST_DECL
+
 Node *ast_decl(Node *var, Vector *init) {
     Node *n;
 
@@ -130,6 +100,19 @@ Node *ast_decl(Node *var, Vector *init) {
     n->declinit = init;
     return n;
 }
+
+Node *node_declvar(Node *n) {
+    assert(n->kind == AST_DECL);
+    return n->declvar;
+}
+
+Vector *node_declinit(Node *n) {
+    assert(n->kind == AST_DECL);
+    return n->declinit;
+}
+
+
+// AST_INIT
 
 Node *ast_init(Node *val, Type *totype, int off) {
     Node *n;
@@ -141,6 +124,14 @@ Node *ast_init(Node *val, Type *totype, int off) {
     return n;
 }
 
+int node_initoff(Node *n) {
+    assert(n->kind == AST_INIT);
+    return n->initoff;
+}
+
+
+// AST_CONV
+
 Node *ast_conv(Type *totype, Node *val) {
     Node *n;
 
@@ -149,25 +140,8 @@ Node *ast_conv(Type *totype, Node *val) {
     return n;
 }
 
-Node *ast_if(Node *cond, Node *then, Node *els) {
-    Node *n;
 
-    n = ast_node(AST_IF, NULL);
-    n->cond = cond;
-    n->then = then;
-    n->els = els;
-    return n;
-}
-
-Node *ast_ternary(Type *ty, Node *cond, Node *then, Node *els) {
-    Node *n;
-
-    n = ast_node(AST_TERNARY, ty);
-    n->cond = cond;
-    n->then = then;
-    n->els = els;
-    return n;
-}
+// AST_RETURN
 
 Node *ast_return(Node *retval) {
     Node *n;
@@ -177,6 +151,9 @@ Node *ast_return(Node *retval) {
     return n;
 }
 
+
+// AST_COMPOUND_STMT
+
 Node *ast_compound_stmt(Vector *stmts) {
     Node *n;
 
@@ -185,14 +162,13 @@ Node *ast_compound_stmt(Vector *stmts) {
     return n;
 }
 
-Node *ast_struct_ref(Type *ty, Node *struc, char *name) {
-    Node *n;
-
-    n = ast_node(AST_STRUCT_REF, ty);
-    n->struc = struc;
-    n->field = name;
-    return n;
+Vector *node_stmts(Node *n) {
+    assert(n->kind == AST_COMPOUND_STMT);
+    return n->stmts;
 }
+
+
+// AST_GOTO
 
 Node *ast_goto(char *label) {
     Node *n;
@@ -244,6 +220,177 @@ Node *ast_dest(char *label) {
     return n;
 }
 
+
+/* Node accessor functions. */
+
+int node_kind(Node *n) {
+    assert(n != NULL);
+    return n->kind;
+}
+
+Type *node_type(Node *n) {
+    assert(n != NULL);
+    return n->ty;
+}
+
+Node *node_operand(Node *n) {
+    // TODO:  ensure we are only called on unary nodes
+    return n->operand;
+}
+
+Node *node_left(Node *n) {
+    return n->left;
+}
+
+Node *node_right(Node *n) {
+    return n->right;
+}
+
+char *node_fname(Node *n) {
+    assert(n->kind == AST_FUNCALL || n->kind == AST_FUNCDESG || n->kind == AST_FUNC);
+    return n->fname;
+}
+
+char *node_label(Node *n) {
+    return n->label;
+}
+
+char *node_newlabel(Node *n) {
+    return n->newlabel;
+}
+
+void node_set_newlabel(Node *n, char *newlabel) {
+    n->newlabel = newlabel;
+}
+
+
+// AST_LITERAL
+
+Node *ast_inttype(Type *ty, long val) {
+    Node *n;
+
+    n = ast_node(AST_LITERAL, ty);
+    n->ival = val;
+    return n;
+}
+
+Node *ast_floattype(Type *ty, double val) {
+    Node *n;
+
+    n = ast_node(AST_LITERAL, ty);
+    n->fval = val;
+    return n;
+}
+
+Node *ast_string(Type *ty, char *sval) {
+    Node *n;
+
+    n = ast_node(AST_LITERAL, ty);
+    n->sval = sval;
+    return n;
+}
+
+long node_literal_ival(Node *n) {
+    assert(n->kind == AST_LITERAL);
+    // TODO:  ensure n->ty is an inttype
+    return n->ival;
+}
+
+double node_literal_fval(Node *n) {
+    assert(n->kind == AST_LITERAL);
+    // TODO:  ensure n->ty is a floattype
+    return n->fval;
+}
+
+
+// AST_LVAR and AST_GVAR
+
+Node *ast_lvar(Type *ty, char *name, Vector *init) {
+    Node *n;
+
+    n = ast_node(AST_LVAR, ty);
+    n->varname = name;
+    n->lvarinit = init;
+    return n;
+}
+
+Node *ast_gvar(Type *ty, char *name, char *glabel) {
+    Node *n;
+
+    n = ast_node(AST_GVAR, ty);
+    n->varname = name;
+    n->glabel = glabel;
+    return n;
+}
+
+char *node_varname(Node *n) {
+    assert(n->kind == AST_LVAR || n->kind == AST_GVAR);
+    return n->varname;
+}
+
+
+// AST_STRUCT_REF
+
+Node *ast_struct_ref(Type *ty, Node *struc, char *name) {
+    Node *n;
+
+    n = ast_node(AST_STRUCT_REF, ty);
+    n->struc = struc;
+    n->field = name;
+    return n;
+}
+
+Node *node_struct_ref_struc(Node *n) {
+    assert(n->kind == AST_STRUCT_REF);
+
+    return n->struc;
+}
+
+char *node_struct_ref_field(Node *n) {
+    assert(n->kind == AST_STRUCT_REF);
+
+    return n->field;
+}
+
+
+// AST_IF and AST_TERNARY
+
+Node *ast_if(Node *cond, Node *then, Node *els) {
+    Node *n;
+
+    n = ast_node(AST_IF, NULL);
+    n->cond = cond;
+    n->then = then;
+    n->els = els;
+    return n;
+}
+
+Node *ast_ternary(Type *ty, Node *cond, Node *then, Node *els) {
+    Node *n;
+
+    n = ast_node(AST_TERNARY, ty);
+    n->cond = cond;
+    n->then = then;
+    n->els = els;
+    return n;
+}
+
+Node *node_cond(Node *n) {
+    assert(n->kind == AST_IF || n->kind == AST_TERNARY);
+    return n->cond;
+}
+
+Node *node_then(Node *n) {
+    assert(n->kind == AST_IF || n->kind == AST_TERNARY);
+    return n->then;
+}
+
+Node *node_els(Node *n) {
+    assert(n->kind == AST_IF || n->kind == AST_TERNARY);
+    return n->els;
+}
+
+    
 /* Textual representation of AST nodes. */
 
 static void uop_to_string(Buffer *b, char *op, Node *node) {
